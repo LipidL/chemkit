@@ -1,0 +1,9 @@
+[package]
+name = "chemkit"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+uom = "0.38.0"
+nalgebra = "0.34"
+thiserror = "2.0"
