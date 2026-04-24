@@ -3,7 +3,7 @@ use uom::Conversion;
 use uom::si::{
     SI, Units,
     angle::{Angle, radian},
-    length::{Length, angstrom},
+    length::Length,
 };
 
 #[derive(Debug, Clone)]
@@ -42,20 +42,16 @@ where
             gamma,
         }
     }
-}
 
-impl<T> CellParameters<T>
-where
-    T: RealField + Copy + Conversion<T, T = T>,
-    SI<T>: Units<T>,
-    angstrom: Conversion<T, T = T>,
-    radian: Conversion<T, T = T>,
-{
-    /// Return a raw nalgebra vector whose components are the cell parameters in angstroms.
-    pub fn to_matrix(&self) -> nalgebra::Matrix3<T> {
-        let a = self.a.get::<angstrom>();
-        let b = self.b.get::<angstrom>();
-        let c = self.c.get::<angstrom>();
+    /// Return a raw nalgebra matrix whose columns are the cell vectors in the given length unit.
+    pub fn to_matrix<LenUnit>(&self) -> nalgebra::Matrix3<T>
+    where
+        LenUnit: uom::si::length::Unit + Conversion<T, T = T>,
+        radian: Conversion<T, T = T>,
+    {
+        let a = self.a.get::<LenUnit>();
+        let b = self.b.get::<LenUnit>();
+        let c = self.c.get::<LenUnit>();
         let alpha = self.alpha.get::<radian>();
         let beta = self.beta.get::<radian>();
         let gamma = self.gamma.get::<radian>();
@@ -70,5 +66,43 @@ where
             T::zero(),
             c * alpha.sin() / gamma.sin(),
         )
+    }
+
+    /// Construct a [`CellParameters`] from a raw lattice matrix whose columns are the cell vectors in the given length unit.
+    pub fn from_matrix<LenUnit>(matrix: nalgebra::Matrix3<T>) -> Self
+    where
+        LenUnit: uom::si::length::Unit + Conversion<T, T = T>,
+        radian: Conversion<T, T = T>,
+    {
+        // cell vectors
+        let va = matrix.column(0);
+        let vb = matrix.column(1);
+        let vc = matrix.column(2);
+
+        // vector norms
+        let va_norm = va.norm();
+        let vb_norm = vb.norm();
+        let vc_norm = vc.norm();
+
+        // cell parameters
+        let a = Length::new::<LenUnit>(va_norm);
+        let b = Length::new::<LenUnit>(vb_norm);
+        let c = Length::new::<LenUnit>(vc_norm);
+
+        let alpha_cos = vb.dot(&vc) / (vb_norm * vc_norm);
+        let beta_cos = va.dot(&vc) / (va_norm * vc_norm);
+        let gamma_cos = va.dot(&vb) / (va_norm * vb_norm);
+        let alpha = Angle::new::<radian>(alpha_cos.acos());
+        let beta = Angle::new::<radian>(beta_cos.acos());
+        let gamma = Angle::new::<radian>(gamma_cos.acos());
+
+        Self {
+            a,
+            b,
+            c,
+            alpha,
+            beta,
+            gamma,
+        }
     }
 }

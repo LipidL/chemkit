@@ -1,21 +1,24 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, marker::PhantomData};
 
-use thiserror::Error;
-use uom::si::f64::Length;
 use uom::si::length::angstrom;
 
-use super::{AtomRecord, PositionKind, RawLattice, RawStructure, StructParser};
+use super::{AtomRecord, PositionKind, RawLattice, RawParser, RawStructure};
 use crate::periodic_table::PeriodicTable;
 
 // Error type
 
-/// The only hard error the lenient state-machine parser can produce:
-/// a line was unambiguously identified as an atom line (field 4 == `"CORE"`)
-/// but the element symbol in field 0 is not in the periodic table.
-#[derive(Error, Debug)]
 pub enum ArcParseError {
-    #[error("line {line}: unknown element '{symbol}'")]
     UnknownElement { line: usize, symbol: String },
+}
+
+impl ToString for ArcParseError {
+    fn to_string(&self) -> String {
+        match self {
+            ArcParseError::UnknownElement { line, symbol } => {
+                format!("line {}: unknown element '{}'", line, symbol)
+            }
+        }
+    }
 }
 
 // Parser
@@ -28,9 +31,7 @@ impl ArcParser {
     }
 }
 
-impl StructParser for ArcParser {
-    type ParseError = ArcParseError;
-
+impl RawParser<angstrom> for ArcParser {
     /// Parse all complete structures from an ARC file using a four-state machine.
     ///
     /// ```text
@@ -51,7 +52,7 @@ impl StructParser for ArcParser {
     /// Unrecognised lines are silently skipped at every transition.
     /// The only hard error is encountering a definite atom line whose element
     /// symbol is not in the periodic table.
-    fn parse(&self, input: &str) -> Result<Vec<RawStructure>, Self::ParseError> {
+    fn parse_raw(&self, input: &str) -> Result<Vec<RawStructure<angstrom>>, String> {
         let table = PeriodicTable::new();
         let mut structures = Vec::new();
 
@@ -139,7 +140,9 @@ impl StructParser for ArcParser {
                             lattice,
                             atoms,
                         }
-                    } else if let Some(record) = try_parse_atom(trimmed, &table, line_no)? {
+                    } else if let Some(record) =
+                        try_parse_atom(trimmed, &table, line_no).map_err(|e| e.to_string())?
+                    {
                         atoms.push(record);
                         State::SeekAtoms {
                             index,
@@ -174,12 +177,12 @@ impl StructParser for ArcParser {
                         properties.insert("arc_q_value".to_string(), q_value.to_string());
                         properties.insert("arc_energy".to_string(), energy.to_string());
 
-                        structures.push(RawStructure {
+                        structures.push(RawStructure::<angstrom> {
                             lattice: Some(lattice),
                             atoms,
                             position_kind: PositionKind::Cartesian,
-                            length_unit: Length::new::<angstrom>(1.0),
                             properties,
+                            _unit: PhantomData,
                         });
 
                         State::SeekEnergy
@@ -282,7 +285,7 @@ fn try_parse_atom(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::StructParser;
+    use crate::parser::RawParser;
 
     const SAMPLE: &str = "\
 !BIOSYM archive 2
@@ -305,14 +308,14 @@ end";
     #[test]
     fn test_parse_structure_count() {
         let parser = ArcParser;
-        let structures = parser.parse(SAMPLE).expect("parse failed");
+        let structures = parser.parse_raw(SAMPLE).expect("parse failed");
         assert_eq!(structures.len(), 2, "expected 2 structures");
     }
 
     #[test]
     fn test_parse_atom_count() {
         let parser = ArcParser;
-        let structures = parser.parse(SAMPLE).expect("parse failed");
+        let structures = parser.parse_raw(SAMPLE).expect("parse failed");
         assert_eq!(
             structures[0].atoms.len(),
             2,
@@ -328,7 +331,7 @@ end";
     #[test]
     fn test_parse_first_atom_position() {
         let parser = ArcParser;
-        let structures = parser.parse(SAMPLE).expect("parse failed");
+        let structures = parser.parse_raw(SAMPLE).expect("parse failed");
         let pos = &structures[0].atoms[0].position;
         assert!((pos[0] - 6.066246000_f64).abs() < 1e-9);
         assert!((pos[1] - 63.544500000_f64).abs() < 1e-9);
@@ -338,7 +341,7 @@ end";
     #[test]
     fn test_parse_lattice() {
         let parser = ArcParser;
-        let structures = parser.parse(SAMPLE).expect("parse failed");
+        let structures = parser.parse_raw(SAMPLE).expect("parse failed");
         let lattice = structures[0].lattice.as_ref().expect("expected a lattice");
         // The a-vector is aligned with x; its norm should equal a = 54.052 Å.
         let a_mag = (lattice.matrix[0][0].powi(2)
@@ -351,7 +354,7 @@ end";
     #[test]
     fn test_parse_properties() {
         let parser = ArcParser;
-        let structures = parser.parse(SAMPLE).expect("parse failed");
+        let structures = parser.parse_raw(SAMPLE).expect("parse failed");
 
         let p0 = &structures[0].properties;
         assert_eq!(p0.get("arc_index").map(String::as_str), Some("0"));
@@ -368,7 +371,7 @@ end";
     #[test]
     fn test_position_kind_is_cartesian() {
         let parser = ArcParser;
-        let structures = parser.parse(SAMPLE).expect("parse failed");
+        let structures = parser.parse_raw(SAMPLE).expect("parse failed");
         assert!(matches!(
             structures[0].position_kind,
             PositionKind::Cartesian
@@ -385,7 +388,7 @@ H        1.0   2.0   3.0 CORE    1 H  H    0.0000    1
 end
 end";
         let parser = ArcParser;
-        let structures = parser.parse(input).expect("parse failed");
+        let structures = parser.parse_raw(input).expect("parse failed");
         assert_eq!(structures.len(), 1);
         assert_eq!(structures[0].atoms.len(), 1);
     }
@@ -399,8 +402,8 @@ Xx        1.0   2.0   3.0 CORE    1 Xx  Xx    0.0000    1
 end
 end";
         let parser = ArcParser;
-        let result = parser.parse(input);
-        assert!(matches!(result, Err(ArcParseError::UnknownElement { .. })));
+        let result = parser.parse_raw(input);
+        assert!(matches!(result, Err(..)));
     }
 
     #[test]
@@ -412,7 +415,7 @@ end";
 PBC   10.0   10.0   10.0   90.0   90.0   90.0";
         let parser = ArcParser;
         let result = parser
-            .parse(input)
+            .parse_raw(input)
             .expect("truncated input should not error");
         assert!(result.is_empty());
     }
@@ -432,7 +435,7 @@ end
 A line squeezed between the two end markers
 end";
         let parser = ArcParser;
-        let structures = parser.parse(input).expect("parse failed");
+        let structures = parser.parse_raw(input).expect("parse failed");
         assert_eq!(structures.len(), 1);
         assert_eq!(structures[0].atoms.len(), 1);
     }

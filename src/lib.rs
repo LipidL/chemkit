@@ -8,14 +8,15 @@ pub mod writer;
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::writer::WriteAll;
 
-    use super::*;
+    use uom::si::length::angstrom;
 
     // Tests that a structure can be read from arc and write to arc file without significant loss
     #[test]
     fn test_arc_roundtrip() {
-        use parser::StructParser;
+        use parser::RawParser;
         const SAMPLE: &str = "\
     !BIOSYM archive 2
     PBC=ON
@@ -35,7 +36,7 @@ mod tests {
     end";
         let parser = parser::ArcParser::new();
         let structures = parser
-            .parse(SAMPLE)
+            .parse_raw(SAMPLE)
             .unwrap()
             .into_iter()
             .map(|s| s.build::<f64>().unwrap())
@@ -43,7 +44,7 @@ mod tests {
         let writer = writer::ArcWriter::new();
         let written = writer.write_all(&structures).unwrap();
         let parsed = parser
-            .parse(&written)
+            .parse_raw(&written)
             .unwrap()
             .into_iter()
             .map(|s| s.build::<f64>().unwrap())
@@ -57,8 +58,8 @@ mod tests {
         let tolerance = 1e-6;
         for (parsed, expected) in parsed.iter().zip(structures.iter()) {
             // Check for cell
-            let parsed_cell = parsed.cell.as_ref().unwrap().to_matrix();
-            let expected_cell = expected.cell.as_ref().unwrap().to_matrix();
+            let parsed_cell = parsed.cell.as_ref().unwrap().to_matrix::<angstrom>();
+            let expected_cell = expected.cell.as_ref().unwrap().to_matrix::<angstrom>();
             assert!(
                 (parsed_cell - expected_cell).abs().max() < tolerance,
                 "parsed cell should match expected cell"
@@ -67,12 +68,12 @@ mod tests {
             // Check for atoms
             for (parsed_atom, expected_atom) in parsed.atoms.iter().zip(expected.atoms.iter()) {
                 let parsed_pos = match &parsed_atom.position {
-                    coordinate::CoordinateSystem::Cartesian(c) => c.to_vector(),
-                    coordinate::CoordinateSystem::Spherical(s) => s.to_vector(),
+                    coordinate::CoordinateSystem::Cartesian(c) => c.to_vector::<angstrom>(),
+                    coordinate::CoordinateSystem::Spherical(s) => s.to_vector::<angstrom>(),
                 };
                 let expected_pos = match &expected_atom.position {
-                    coordinate::CoordinateSystem::Cartesian(c) => c.to_vector(),
-                    coordinate::CoordinateSystem::Spherical(s) => s.to_vector(),
+                    coordinate::CoordinateSystem::Cartesian(c) => c.to_vector::<angstrom>(),
+                    coordinate::CoordinateSystem::Spherical(s) => s.to_vector::<angstrom>(),
                 };
                 assert!(
                     (parsed_pos - expected_pos).abs().max() < tolerance,
