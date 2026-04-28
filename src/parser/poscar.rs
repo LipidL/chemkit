@@ -119,7 +119,7 @@ impl RawParser<angstrom, (&str, Option<&str>)> for PoscarParser {
                     .map_err(|e| format!("Error parsing scaling factor: {e}"))?
                     .abs(); // The expected volume is given in the scaling factor line with leading "-"
                 let actual_volume = lattice.determinant();
-                let scaling_factor = expected_volume / actual_volume;
+                let scaling_factor = (expected_volume / actual_volume).cbrt();
                 // Scale the lattice to get the expected volume
                 let lattice = lattice * scaling_factor;
                 (lattice, [scaling_factor; 3])
@@ -256,25 +256,40 @@ mod tests {
     use super::*;
     use crate::parser::RawParser;
 
-    fn check_position(expected: &[f64; 3], actual: &[f64; 3], tolerance: f64) {
+    /// Helper function to compare to vector3 within a given tolerance
+    fn check_vec3(expected: &[f64; 3], actual: &[f64; 3], tolerance: f64) {
         assert!(
             (Vector3::from_column_slice(expected) - Vector3::from_column_slice(actual)).norm()
                 < tolerance
         );
     }
 
-    const SAMPLE_FRACTIONAL: &str = "\
-Comment line
-1.0
-10.0 0.0 0.0
-0.0 10.0 0.0
-0.0 0.0 10.0
-O H
-1 2
-Direct
-0.0 0.0 0.0
-0.0 0.0 0.5
-0.0 0.5 0.5";
+    /// Helper function to compare two positions within a given tolerance
+    fn check_position(expected: &[f64; 3], actual: &AtomRecord, tolerance: f64) {
+        let actual_pos = &actual.position;
+        check_vec3(expected, actual_pos, tolerance);
+    }
+
+    /// Helper function to compare two lattices within a given tolerance
+    fn check_lattice(expected: &[[f64; 3]; 3], actual: &RawLattice, tolerance: f64) {
+        let actual_lattice = actual.matrix.as_ref();
+        for (e, a) in expected.iter().zip(actual_lattice.iter()) {
+            check_vec3(e, a, tolerance);
+        }
+    }
+
+    const SAMPLE_FRACTIONAL: &str = r#"Comment line
+        1.0
+        10.0 0.0 0.0
+        0.0 10.0 0.0
+        0.0 0.0 10.0
+        O H
+        1 2
+        Direct
+        0.0 0.0 0.0
+        0.0 0.0 0.5
+        0.0 0.5 0.5
+    "#;
 
     #[test]
     fn test_parse_fractional() {
@@ -288,10 +303,137 @@ Direct
         assert_eq!(structure.atoms[0].element.atomic_number, 8);
         assert_eq!(structure.atoms[1].element.atomic_number, 1);
         assert_eq!(structure.atoms[2].element.atomic_number, 1);
+        let expected_frac_pos = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.5], [0.0, 0.5, 0.5]];
+        for (expected, actual) in expected_frac_pos.iter().zip(structure.atoms.iter()) {
+            check_position(expected, &actual, 1e-6);
+        }
+        let expected_lattice = [[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]];
+        check_lattice(
+            &expected_lattice,
+            &structure.lattice.as_ref().unwrap(),
+            1e-6,
+        );
+        assert!(matches!(structure.position_kind, PositionKind::Fractional));
+    }
+    const SAMPLE_CARTESIAN: &str = r#"Comment line
+        1.0
+        10.0 0.0 0.0
+        0.0 10.0 0.0
+        0.0 0.0 10.0
+        O H
+        1 2
+        Cartesian
+        0.0 0.0 0.0
+        0.0 0.0 5.0
+        0.0 5.0 5.0
+    "#;
+    #[test]
+    fn test_parse_cartesian() {
+        let parser = PoscarParser;
+        let structures = parser
+            .parse_raw((SAMPLE_CARTESIAN, None))
+            .expect("parse failed");
+        assert_eq!(structures.len(), 1);
+        let structure = &structures[0];
+        assert_eq!(structure.atoms.len(), 3);
+        assert_eq!(structure.atoms[0].element.atomic_number, 8);
+        assert_eq!(structure.atoms[1].element.atomic_number, 1);
+        assert_eq!(structure.atoms[2].element.atomic_number, 1);
+        let expected_cart_pos = [[0.0, 0.0, 0.0], [0.0, 0.0, 5.0], [0.0, 5.0, 5.0]];
+        for (expected, actual) in expected_cart_pos.iter().zip(structure.atoms.iter()) {
+            check_position(expected, &actual, 1e-6);
+        }
+        let expected_lattice = [[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]];
+        check_lattice(
+            &expected_lattice,
+            &structure.lattice.as_ref().unwrap(),
+            1e-6,
+        );
+        assert!(matches!(structure.position_kind, PositionKind::Cartesian));
+    }
+    const SAMPLE_SELECTIVE_DYNAMICS: &str = r#"Comment line
+        1.0
+        10.0 0.0 0.0
+        0.0 10.0 0.0
+        0.0 0.0 10.0
+        O H
+        1 2
+        Selective Dynamics
+        Direct
+        0.0 0.0 0.0 T T T
+        0.0 0.0 0.5 F F F
+        0.0 0.5 0.5 T F T
+    "#;
+    #[test]
+    fn test_parse_selective_dynamics() {
+        let parser = PoscarParser;
+        let structures = parser
+            .parse_raw((SAMPLE_SELECTIVE_DYNAMICS, None))
+            .expect("parse failed");
+        assert_eq!(structures.len(), 1);
+        let structure = &structures[0];
+        assert_eq!(structure.atoms.len(), 3);
+        assert_eq!(structure.atoms[0].element.atomic_number, 8);
+        assert_eq!(structure.atoms[1].element.atomic_number, 1);
+        assert_eq!(structure.atoms[2].element.atomic_number, 1);
         let expected_frac_positions = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.5], [0.0, 0.5, 0.5]];
         for (expected, actual) in expected_frac_positions.iter().zip(structure.atoms.iter()) {
-            check_position(expected, &actual.position, 1e-6);
+            check_position(expected, &actual, 1e-6);
         }
+        let expected_lattice = [[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]];
+        check_lattice(
+            &expected_lattice,
+            &structure.lattice.as_ref().unwrap(),
+            1e-6,
+        );
         assert!(matches!(structure.position_kind, PositionKind::Fractional));
+    }
+    const SAMPLE_SCALING_VOLUME: &str = r#"Comment line
+        -1.0
+        10.0 0.0 0.0
+        0.0 10.0 0.0
+        0.0 0.0 10.0
+        O
+        1
+        Direct
+        0.0 0.0 0.0
+    "#;
+    #[test]
+    fn test_parse_scaling_volume() {
+        let parser = PoscarParser;
+        let structures = parser
+            .parse_raw((SAMPLE_SCALING_VOLUME, None))
+            .expect("parse failed");
+        assert_eq!(structures.len(), 1);
+        let structure = &structures[0];
+        assert_eq!(structure.atoms.len(), 1);
+        assert_eq!(structure.atoms[0].element.atomic_number, 8);
+        let expected_frac_positions = [[0.0, 0.0, 0.0]];
+        for (expected, actual) in expected_frac_positions.iter().zip(structure.atoms.iter()) {
+            check_position(expected, &actual, 1e-6);
+        }
+        let expected_lattice = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        check_lattice(
+            &expected_lattice,
+            &structure.lattice.as_ref().unwrap(),
+            1e-6,
+        );
+    }
+
+    const SAMPLE_INVALID: &str = r#"Comment line
+        1.0
+        10.0 0.0
+        0.0 10.0 0.0
+        0.0 0.0 10.0
+        O H
+        1 2
+        Direct
+        0.0 0.0 0.0
+    "#;
+    #[test]
+    fn test_parse_invalid() {
+        let parser = PoscarParser;
+        let result = parser.parse_raw((SAMPLE_INVALID, None));
+        assert!(result.is_err());
     }
 }
