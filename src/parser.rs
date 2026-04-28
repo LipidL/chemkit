@@ -1,4 +1,5 @@
 mod arc;
+mod poscar;
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -56,6 +57,13 @@ impl RawLattice {
         ];
 
         Self { matrix }
+    }
+
+    /// Construct a `RawLattice` from nalgebra's `Matrix3` representation.
+    pub fn from_matrix(matrix: nalgebra::Matrix3<f64>) -> Self {
+        Self {
+            matrix: matrix.into(),
+        }
     }
 
     /// Return a nalgebra matrix whose **columns** are the lattice vectors.
@@ -195,13 +203,13 @@ where
 
 /// A trait for parsing structures from text input.
 /// The `LenUnit` type parameter is the unit of length used for the parsed structures.
-pub(crate) trait RawParser<LenUnit>
+pub(crate) trait RawParser<LenUnit, I>
 where
     LenUnit: uom::si::length::Unit,
 {
     /// Parse one or more structures from the input text.
     /// Returns a `Vec` to naturally support multi-frame formats
-    fn parse_raw(&self, input: &str) -> Result<Vec<RawStructure<LenUnit>>, String>;
+    fn parse_raw(&self, input: I) -> Result<Vec<RawStructure<LenUnit>>, String>;
 }
 
 #[derive(Debug, Error)]
@@ -214,11 +222,11 @@ pub enum ParseStructureError {
     Build(BuildError),
 }
 
-pub trait StructureParser<LenUnit>
+pub trait StructureParser<LenUnit, I>
 where
     LenUnit: uom::si::length::Unit,
 {
-    fn parse<T>(&self, input: &str) -> Result<Vec<Structure<T>>, ParseStructureError>
+    fn parse<T>(&self, input: I) -> Result<Vec<Structure<T>>, ParseStructureError>
     where
         T: RealField + Copy + Conversion<T, T = T>,
         SI<T>: Units<T>,
@@ -226,12 +234,12 @@ where
         radian: Conversion<T, T = T>;
 }
 
-impl<P, LenUnit> StructureParser<LenUnit> for P
+impl<P, LenUnit, I> StructureParser<LenUnit, I> for P
 where
-    P: RawParser<LenUnit>,
+    P: RawParser<LenUnit, I>,
     LenUnit: uom::si::length::Unit,
 {
-    fn parse<T>(&self, input: &str) -> Result<Vec<Structure<T>>, ParseStructureError>
+    fn parse<T>(&self, input: I) -> Result<Vec<Structure<T>>, ParseStructureError>
     where
         T: RealField + Copy + Conversion<T, T = T>,
         SI<T>: Units<T>,
@@ -246,4 +254,5 @@ where
     }
 }
 
-pub use arc::{ArcParseError, ArcParser};
+pub use arc::ArcParser;
+pub use poscar::PoscarParser;

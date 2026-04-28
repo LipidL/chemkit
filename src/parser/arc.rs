@@ -6,8 +6,7 @@ use super::{AtomRecord, PositionKind, RawLattice, RawParser, RawStructure};
 use crate::periodic_table::PeriodicTable;
 
 // Error type
-
-pub enum ArcParseError {
+enum ArcParseError {
     UnknownElement { line: usize, symbol: String },
 }
 
@@ -31,7 +30,7 @@ impl ArcParser {
     }
 }
 
-impl RawParser<angstrom> for ArcParser {
+impl RawParser<angstrom, &str> for ArcParser {
     /// Parse all complete structures from an ARC file using a four-state machine.
     ///
     /// ```text
