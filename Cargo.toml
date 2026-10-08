@@ -2,6 +2,11 @@
 name = "chemkit"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+description = "Parsing and writing of molecular structure files"
+license = "MIT"
+repository = "https://github.com/LipidL/chemkit"
+readme = "README.md"
 
 [dependencies]
 uom = "0.38.0"

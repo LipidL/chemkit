@@ -67,3 +67,7 @@ Key points:
 cargo test      # run the test suite (unit tests + ARC round-trip)
 cargo build     # build the library
 ```
+
+## License
+
+Released under the [MIT License](LICENSE).
